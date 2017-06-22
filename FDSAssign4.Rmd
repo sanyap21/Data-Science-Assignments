@@ -1,0 +1,379 @@
+---
+title: "FDSAssignment4"
+author: "Sanya Pooniwala"
+date: "11/10/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##Install Packages
+```{r}
+##Install packages
+##install.packages("twitteR")
+##install.packages("plyr")
+##install.packages("tm")
+##install.packages("SnowballC")
+##install.packages("text2vec")
+##install.packages("RWeka")
+##install.packages("rJava")
+##install.packages("e1071")
+##install.packages("ngram")
+##install.packages("assertive")
+##install.packages("Hmisc")
+##install.packages("caret")
+##install.packages("ROCR")
+##install.packages("rpart")
+##install.packages("igraph")
+
+library(igraph)
+library(rpart)
+library(ROCR)
+library(kernlab)
+library(caret)
+library(ngram)
+library(assertive)
+library(Hmisc)
+library(e1071)
+library(RWeka)
+library(SnowballC)
+library(tm)
+library(twitteR)
+library(plyr)
+library(text2vec)
+```
+```{r}
+##setup credentials
+consumerKey <- 'UAdOVfnCnGYBr2W9s0QGcy9x6'
+consumerSecret <- '2NNk4YovxTqbwDNUYCQc0Xo0dC65jzuJOXxpSt81A4IHg5V0Z0'
+accessToken <- '600206408-YkgXruZw0NhQNurLrbfRfxaLZ4dbBAz1QQ1rW7cN'
+accessSecret <- '7ZRAU8vjVg0zGoIe5Sfsa2YQvOxVllamgqIQobapwE8kv'
+setup_twitter_oauth(consumerKey, consumerSecret, accessToken, accessSecret)
+Sys.setlocale(locale = "C")
+
+```
+##QUES-1 PART A
+##Retrieve 1000 tweets using twitter API
+```{r}
+##get tweets
+
+##tweetData <- searchTwitter("Hillary Clinton",n = 1000, lang = "en", resultType = "recent")
+##tweetdf <- do.call("rbind", lapply(tweetData, as.data.frame))
+
+##Save twitter data
+
+##write.csv(tweetdf,file="tweetsData.csv",row.names=FALSE)
+
+##Read Data from csv
+savedTweetdf<- read.csv("tweetsData.csv")
+##twittUser<- getUser("KingRJ22")
+##twittUser$profileImageUrl
+```
+##QUES-1 PART B
+##Hand label 100 tweets
+```{r}
+##loop to get user profile image url
+##urlList<- list()
+##j=1
+##for(i in 101:200) {
+   ## row <- savedTweetdf[i,]
+   ##userName<- row$screenName
+   ##twittUsers<- getUser(userName)
+   ##urlList[j]<-twittUsers$profileImageUrl
+   ##j=j+1
+    #print(urlList[i])
+##}
+
+genderList<-c(NA,"F",NA,"F","F","F","F","F","M","F","F","F",NA,"M","F",NA,"M","F","F","M",NA,"F",NA,"F",NA,NA,"F","M","M",NA,
+              NA,"F",NA,NA,"M","F",NA,"F","F","M",NA,"F","F",NA,NA,"F","F",NA,NA,NA,NA,"F","F","F","M",NA,"M",NA,NA,NA,
+              "F","M","F","F","F","M","M",NA,NA,"M",NA,"F","M","M","M",NA,"M","M","F","F","M","F",NA,"M",NA,NA,"F","M","F",NA,
+              "F","F","M","F",NA,NA,"F",NA,"M","M","M",NA,NA,"F",NA,"M","M",NA,"F","F",NA,NA,NA,NA,NA,NA,NA,"M","M","M",
+              "M","F",NA,"F","M","F","M",NA,"F","F","F",NA,NA,"F","F","F","F",NA,"M","F","F",NA,"F","F",NA,"F","F","M","M","F","M","M",NA,NA,
+              "F",NA,"M","F",NA,NA,NA,NA,"F")
+
+
+genderArray <- rep(NA, nrow(savedTweetdf)) # base gender array
+
+##Replace all tags with new tags(Hand label)
+for(i in 1:length(genderList)) {
+  if(!is.na(genderList[i])) {
+    genderArray[i] = genderList[i]
+  }
+}
+##Distribution of labels for training set.
+table(genderArray)
+
+##Add column to dataframe
+savedTweetdf$gender <- genderArray
+```
+##QUES 1 PART C
+##SVM Classifier using n-gram approach<br/>
+```{r}
+generateDocTermMatrix <- function(tweetsText, ng) {
+        tweetCollection <- Corpus(VectorSource(tweetsText))
+        #clean up the text
+        #remove url
+        removeURL <- function(x) gsub('http.*\\s*', '', x)
+        tweetCollection <- tm_map(tweetCollection, content_transformer(removeURL))
+        #remove punctuation
+        tweetCollection <- tm_map(tweetCollection, removePunctuation)
+        #to lower case
+        tweetCollection <- tm_map(tweetCollection, content_transformer(tolower))
+        #remove stopwords
+        tweetCollection <- tm_map(tweetCollection, removeWords, stopwords("english"))
+        #remove numbers
+        tweetCollection <- tm_map(tweetCollection, removeNumbers)
+        #remove space
+        tweetCollection <- tm_map(tweetCollection, stripWhitespace)
+        #stem word
+        tweetCollection<- tm_map(tweetCollection,stemDocument,language="en")
+  
+  options(mc.cores=1) # RWeka has a problem with parallel threads
+  ngramTokenizer <- function(x) NGramTokenizer(x, Weka_control(min = ng, max = ng)) # create n-grams
+  dtm <- DocumentTermMatrix(tweetCollection, control = list(tokenize = ngramTokenizer)) # create Document Term Matrix
+  return(dtm)
+  }
+#getTweets
+tweetsText = subset(savedTweetdf$text, !is.na(savedTweetdf$gender))
+trainingTweets = subset(savedTweetdf$gender, !is.na(savedTweetdf$gender))
+
+##testTweets = subset(savedTweetdf$text, is.na(savedTweetdf$gender))
+
+##UNIGRAM MODEL
+UniGramDtm = generateDocTermMatrix(tweetsText, 1)
+UniGramFeatures = UniGramDtm$dimnames$Terms
+UniGramDf = data.frame(trainingTweets, as.matrix(UniGramDtm))
+
+UniGramModel <- svm(trainingTweets~., data=UniGramDf, type = 'C-classification', kernel = 'linear', cross=6)
+
+paste(findFreqTerms(UniGramDtm, 8))
+plot(UniGramModel$fitted)
+
+##BIGRAM MODEL
+BiGramDtm = generateDocTermMatrix(tweetsText, 2)
+BiGramFeatures = BiGramDtm$dimnames$Terms
+BiGramDf = data.frame(trainingTweets, as.matrix(BiGramDtm))
+
+BiGramModel <- svm(trainingTweets~., data=BiGramDf, type = 'C-classification', kernel = 'linear', cross=6)
+
+paste(findFreqTerms(BiGramDtm, 6))
+plot(BiGramModel$fitted)
+
+##TRIGRAM MODEL
+TriGramDtm = generateDocTermMatrix(tweetsText, 3)
+TriGramFeatures = TriGramDtm$dimnames$Terms
+TriGramDf = data.frame(trainingTweets, as.matrix(TriGramDtm))
+
+TriGramModel <- svm(trainingTweets~., data=TriGramDf, type = 'C-classification', kernel = 'linear',cross=6)
+
+paste(findFreqTerms(TriGramDtm, 6))
+plot(TriGramModel$fitted)
+
+```
+
+##QUES 1 PART D
+##Most common features
+```{r}
+##3 Unigrams, 5 Bi-Grams and 2 Tri-Grams Features
+
+##Decision boundary is a linear combination of support vectors in linear SVM Classifier
+
+##Common features for Females
+
+weightUniFemale <- sort(as.data.frame(t(UniGramModel$coefs[1:UniGramModel$nSV[1]])%*%UniGramModel$SV[1:UniGramModel$nSV[1], ]), 
+                        decreasing = TRUE)
+weightBiFemale <- sort(as.data.frame(t(BiGramModel$coefs[1:BiGramModel$nSV[1]])%*%BiGramModel$SV[1:BiGramModel$nSV[1], ]), 
+                       decreasing = TRUE)
+weightTriFemale <- sort(as.data.frame(t(TriGramModel$coefs[1:TriGramModel$nSV[1]])%*%TriGramModel$SV[1:TriGramModel$nSV[1], ]), 
+                        decreasing = TRUE)
+
+FemaleFeatures = append(append(weightUniFemale[1:3], weightBiFemale[1:5]), weightTriFemale[1:2])
+paste(names(FemaleFeatures))
+
+##Common features for Males
+
+    weightUniMale  <-sort(as.data.frame(t(UniGramModel$coefs[UniGramModel$nSV[1]:UniGramModel$tot.nSV]) %*% UniGramModel$SV[UniGramModel$nSV[1] : UniGramModel$tot.nSV, ]), decreasing = TRUE)
+    
+    weightBiMale  <- sort(as.data.frame(t(BiGramModel$coefs[BiGramModel$nSV[1]:BiGramModel$tot.nSV]) %*% BiGramModel$SV[BiGramModel$nSV[1]:BiGramModel$tot.nSV, ]), decreasing = TRUE)
+    
+    weightTriMale  <- sort(as.data.frame(t(TriGramModel$coefs[TriGramModel$nSV[1]:TriGramModel$tot.nSV]) %*% TriGramModel$SV[TriGramModel$nSV[1]:TriGramModel$tot.nSV, ]), decreasing = TRUE)
+
+MaleFeatures = append(append(weightUniMale[1:3], weightBiMale[1:5]), weightTriMale[1:2])
+paste(names(MaleFeatures))
+
+
+```
+##QUES 1 PART E
+##Classifier Performance Evaluation
+```{r}
+##Summary of accuracies of uni-gram model
+summary(UniGramModel)
+
+##Summary of accuracies of bi-gram model
+summary(BiGramModel)
+
+##Summary of accuracies of tri-gram model
+summary(TriGramModel)
+
+```
+##QUES 1 PART F
+##Retrain
+```{r}
+genderList2<-c("F",NA,NA,"F",NA,"M","M","M","F",NA,"M","M",NA,"F","F",NA,NA,NA,"M","M","M",NA,"M","F","F","F","M",NA,
+              "M","F",NA,"F","M","F","M",NA,"F","F","F",NA,NA,"F","F","F","F",NA,"M","F","M","F","F","F",NA,"M","F","F","M","M","F","M",NA,
+              "F","F","F","M","F","F","F",NA,"M","F",NA,"M","F","F","M",NA,"F",NA,"F",NA,NA,"F","M","M","M","M","F","F","M","F","F","M","M",
+              NA,"M","M",NA,"F","F","M","F",NA,"F","M","F","M",NA,"F","F","F",NA,NA,"F","F","F","F",NA,"M","F","F",NA,"F","F",NA,"F","F","M")
+genderList2<- append(genderList,genderList2)
+
+##Replace all tags with new tags(Hand label)
+for(i in 1:length(genderList)) {
+  if(!is.na(genderList2[i])) {
+    genderArray[i] = genderList2[i]
+  }
+}
+##Distribution of labels for training set.
+table(genderArray)
+
+##Add column to dataframe
+savedTweetdf$gender <- genderArray
+
+##get tweets
+tweetsText2 = subset(savedTweetdf$text, !is.na(savedTweetdf$gender))
+trainingTweets2 = subset(savedTweetdf$gender, !is.na(savedTweetdf$gender))
+
+##UNIGRAM MODEL
+UniGramDtm2 = generateDocTermMatrix(tweetsText2, 1)
+UniGramFeatures2 = UniGramDtm2$dimnames$Terms
+UniGramDf2 = data.frame(trainingTweets2, as.matrix(UniGramDtm2))
+
+UniGramModel2 <- svm(trainingTweets2~., data=UniGramDf2, type = 'C-classification', kernel = 'linear', cross=6)
+
+paste(findFreqTerms(UniGramDtm2, 8))
+plot(UniGramModel2$fitted)
+
+##BIGRAM MODEL
+BiGramDtm2 = generateDocTermMatrix(tweetsText2, 2)
+BiGramFeatures2 = BiGramDtm2$dimnames$Terms
+BiGramDf2 = data.frame(trainingTweets2, as.matrix(BiGramDtm2))
+
+BiGramModel2 <- svm(trainingTweets2~., data=BiGramDf2, type = 'C-classification', kernel = 'linear', cross=6)
+
+paste(findFreqTerms(BiGramDtm2, 6))
+plot(BiGramModel2$fitted)
+
+##TRIGRAM MODEL
+TriGramDtm2 = generateDocTermMatrix(tweetsText2, 3)
+TriGramFeatures2 = TriGramDtm2$dimnames$Terms
+TriGramDf2 = data.frame(trainingTweets2, as.matrix(TriGramDtm2))
+
+TriGramModel2 <- svm(trainingTweets2~., data=TriGramDf2, type = 'C-classification', kernel = 'linear',cross=6)
+
+paste(findFreqTerms(TriGramDtm2, 6))
+plot(TriGramModel2$fitted)
+
+
+##Evaluation
+##Summary of accuracies of uni-gram model
+summary(UniGramModel2)
+
+##Summary of accuracies of bi-gram model
+summary(BiGramModel2)
+
+##Summary of accuracies of tri-gram model
+summary(TriGramModel2)
+```
+
+##NETWORKS AND LANGUAGE MODEL
+
+##QUES 2 PART A
+##Build an adjacency matrix of skills
+```{r}
+#Load the data
+load("TDM.RData", verbose = TRUE) 
+termDocMatrix <- as.matrix(termDocMatrix)
+
+termDocMatrix[termDocMatrix>=1]<- 1
+adjTermMatrix<- termDocMatrix %*% (t(termDocMatrix))
+
+graphAdj <- graph.adjacency(adjTermMatrix, mode = "undirected")
+summary(graphAdj)
+
+#Convert to simple graph (no loops)
+graphAdj <- simplify(graphAdj) 
+V(graphAdj)$label <- V(graphAdj)$name
+V(graphAdj)$degree <- degree(graphAdj)
+
+##Graph plot for Adjacency Matrix
+plot(graphAdj, layout=layout.auto(graphAdj))
+
+```
+##QUES 2 PART B
+##Betweenness and closeness
+```{r}
+
+betweenNess<-sort(betweenness(graphAdj), decreasing = TRUE)
+
+closeNess<-sort(closeness(graphAdj),decreasing = TRUE)
+##Betweenness and closeness
+betweenNess
+closeNess
+
+```
+##QUES 2 PART C
+##Correlation
+```{r}
+corrDf <- data.frame(V(graphAdj)$name, betweenNess, closeNess)
+
+##Plot for betweenness and closeness
+plot(corrDf[2:3])
+
+cor(corrDf[2:3])
+```
+##QUES 2 PART D
+## Design term doc matrix
+```{r}
+
+##High betweeness low closeness
+matrix1<- matrix(c(1,1,1,1,1, 0,1,0,1,0, 0,0,0,0,0, 1,1,0,0,0, 0,0,0,1,1), nrow = 5,ncol=5)
+graph1 <- graph.adjacency(matrix1, mode = "undirected")
+summary(graph1)
+
+#Convert to simple graph (no loops)
+graph1 <- simplify(graph1) 
+#V(graph1)$label <- V(graph1)$name
+V(graph1)$degree <- degree(graph1)
+
+cat("\nGraph plot for Adjacency Matrix\n")
+plot(graph1, layout=layout.auto(graph1))
+
+sort(betweenness(graph1), decreasing = TRUE)
+
+sort(closeness(graph1),decreasing = TRUE)
+
+##High closeness low betweeness
+matrix2<- matrix(c(0,1,1,1,0, 1,0,0,0,1, 1,0,0,0,1, 1,0,0,0,1, 0,1,1,1,0), nrow = 5,ncol=5)
+graph2 <- graph.adjacency(matrix2, mode = "undirected")
+summary(graph2)
+
+##Convert to simple graph (no loops)
+graph2 <- simplify(graph2) 
+
+V(graph2)$degree <- degree(graph2)
+
+##Graph plot for Adjacency Matrix
+plot(graph2)
+
+sort(betweenness(graph2), decreasing = TRUE)
+
+sort(closeness(graph2),decreasing = TRUE)
+
+```
+
+
+
+
+
+
+
+
