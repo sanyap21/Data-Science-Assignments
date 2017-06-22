@@ -1,0 +1,152 @@
+---
+title: "FDSAssignment5"
+author: "Sanya Pooniwala"
+date: "11/20/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+##Install required packages
+#install.packages("zoo")
+#install.packages("xts")
+#install.packages("forecast")
+#install.packages("tseries")
+#devtools::install_github("twitter/AnomalyDetection")
+library(zoo)
+library(xts)
+library(forecast)
+library(tseries)
+library(AnomalyDetection)
+```
+
+##VISUALIZATION OF HEALTH DATA
+##PART A
+## Explore data set
+```{r}
+
+healthDataSet<-read.csv("Health Data.csv")
+
+colnames(healthDataSet)<- c("Start","Finish","StepsCount")
+healthDataSet$StepsCount<- as.numeric(healthDataSet$StepsCount)
+healthDataSet$Start<-gsub("/", "-",healthDataSet$Start)
+healthDataSet$Finish<-gsub("/","-",healthDataSet$Finish)
+
+healthDataSet$Start<- as.POSIXct(strptime(healthDataSet$Start, "%m-%d-%y %H:%M"))
+healthDataSet$Finish<- as.POSIXct(strptime(healthDataSet$Finish, "%m-%d-%y %H:%M"))
+
+startDate <- as.POSIXlt(healthDataSet$Start,format = "%m/%d/%Y %H:%M")
+finishDate<- as.POSIXlt(healthDataSet$Finish,format = "%m/%d/%Y %H:%M")
+
+healthDataSet$Start<-startDate
+healthDataSet$Finish<-finishDate
+
+aggMonthDF<- aggregate(healthDataSet$StepsCount, list(month=substr(healthDataSet$Finish,1,7)), sum) 
+colnames(aggMonthDF)<-c("Month","StepsCount")
+tempYearMon<- as.yearmon(aggMonthDF$Month)
+aggMonthDF$Month<-tempYearMon
+plot(aggMonthDF,type="l")
+##As we can see that it's a time-series, therefore time-series graph plot is best for this data. A line is best to visualize this data. 
+
+
+```
+## PART B
+## Analyze Seasonal Patterns
+```{r}
+##Seasonal Pattern can be seen visually in the time-series Plot for Month, Week and Day data.
+
+##Monthly data
+aggMonthTS <-ts(aggMonthDF$StepsCount, frequency=8)
+decomposeAggMonthTS = stl(aggMonthTS, s.window="periodic")
+plot(decomposeAggMonthTS$time.series, xlab = "Month")
+
+##Function to format date
+formatDates <- function(x) {
+	weeks <- function(x) as.numeric(x + 3) %/% 7 + 1
+	sprintf("%s%05d", format(x, "%Y/%m/Week"), weeks(x) - weeks(x[1]) + 1)
+}
+
+##Weekly data
+dates <- as.Date(healthDataSet$Finish, "%Y-%m-%d")
+aggWeekDF <- aggregate(healthDataSet$StepsCount, list(Date = formatDates(dates)), sum)
+aggWeekTS <- ts(aggWeekDF$x, frequency = 52)
+##Weekly Plot for seasonal Pattern
+decomposeAggWeek = stl(aggWeekTS, s.window="periodic")
+plot(decomposeAggWeek$time.series)
+
+##Day wise Data
+dayData <- healthDataSet
+dayData$Finish <- as.Date(substr(dayData$Finish, 1, 10))
+dayData = aggregate(dayData$Steps, list(day = dayData$Finish), sum)
+dayDataTS <- ts(dayData$x, start = c(2015, 2, 16), frequency = 180)
+##Day wise plot for seasonal pattern
+decomposeDay = stl(dayDataTS, s.window="periodic")
+plot(decomposeDay$time.series)
+
+
+##From the above 3 plots, we can see that anomalies are hidden as we aggregate the data from daily to weekly and monthly.
+
+```
+
+### 3. Prediction Model<br/>
+```{r echo=FALSE}
+trainingDataMonth <- head(aggMonthDF, -3)
+testDataMonth <- tail(aggMonthDF, 3)
+
+trainingMonTS <- ts(trainingDataMonth$StepsCount, frequency = 12)
+testMonTS <- ts(testDataMonth$StepsCount, frequency = 12)
+
+monthDataFit <- tbats(trainingMonTS)
+monthDataForecast <- forecast(monthDataFit, h=4)
+monthErr <- sum(testDataMonth$StepsCount - tail(monthDataForecast$mean, 3))
+
+# Removing last 3 months
+trainingDataWeek <- head(aggWeekDF, -12) 
+testDataWeek <- tail(aggWeekDF, 12)
+trainingWeekTS <- ts(trainingDataWeek$x, frequency = 52)
+
+weekDataFit <- tbats(trainingWeekTS)
+weekDataForecast <- forecast(weekDataFit, h=13)
+weekErr <- sum(tail(weekDataForecast$mean, 12) - testDataWeek$x)
+
+trainingDataDay <- head(dayData, -30) # Removing last 3 months
+testDataDay <- tail(dayData, 30)
+trainingDayTS <- ts(trainingDataDay$x, frequency = 365)
+
+dayDataFit <- tbats(trainingDayTS)
+dayDataForecast <- forecast(dayDataFit, h=31)
+dayErr <- sum(tail(dayDataForecast$mean, 30) - testDataDay$x)
+
+##Month Error
+abs(monthErr)
+
+##Week Error
+abs(weekErr)
+
+##Day Error
+abs(dayErr)
+
+## From the above values we can see that Day Model performs best. This is because in week and month models, anomalies get aggregated.
+```
+
+##PART D
+##Analyze Anomalies<br/>
+```{r}
+##Anomalies can be identified using a boxplot as it shows the outliers.
+boxplot(aggMonthDF$StepsCount)
+boxplot(aggWeekDF$x)
+boxplot(dayData$x)
+```
+
+### PART E
+### Visualize Anomaly Days<br/>
+```{r}
+##Anomalies are highlighted using small circles as it can be clearly shown through the marking that they are anomalies.
+dayData$day <- as.POSIXct(dayData$day)
+AnomalyPlot = AnomalyDetectionTs(dayData, max_anoms=0.1, direction='both', plot=TRUE)
+AnomalyPlot$plot
+```
+
